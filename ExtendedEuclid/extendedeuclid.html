@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<title>Extended Euclid</title>
+		<style>
+			body { margin: 0; }
+            input::-webkit-outer-spin-button,
+            input::-webkit-inner-spin-button {
+                /* display: none; <- Crashes Chrome on hover */
+                -webkit-appearance: none;
+                margin: 0; /* <-- Apparently some margin are still there even though it's hidden */
+            }
+            input[type=number] {
+                -moz-appearance:textfield; /* Firefox */
+            }
+            .captureElements, #nextButton, #restartButton {
+                border-radius: 10px;
+                position: absolute;
+                top: 755px;                                
+                line-height: 60px;                         
+                font-size:60px;
+                visibility: hidden;
+            }
+            .captureInput {
+                height: 60px;
+                background-color: #000000;
+                color: #ffffff;                                
+            }
+            #i_a {                                
+                left: 650px;
+                width: 70px;
+            }
+            #i_b {                                
+                left: 750px;
+                width: 70px;                
+            }
+            #solveButton{    
+                height: 65px;                            
+                left: 850px;
+                line-height: 28px;
+                width: 150px;
+                cursor:pointer;
+            }
+            #nextButton{    
+                height: 65px;                            
+                left: 50px;
+                line-height: 28px;
+                width: 200px;
+                cursor:pointer;
+            }
+            #restartButton{    
+                height: 65px;                            
+                left: 50px;
+                line-height: 28px;
+                width: 200px;
+                cursor:pointer;
+            }            
+            #solveButton:hover, #restartButton:hover{           
+                background-color: #ffd700;
+                -webkit-animation-name: greenPulse;
+                -webkit-animation-duration: 2s;
+                -webkit-animation-iteration-count: 1;
+                -webkit-box-shadow: 0 0 18px #ffd700;      
+            }            
+		</style>
+	</head>
+	<body>
+        <script async src="https://unpkg.com/es-module-shims@1.3.6/dist/es-module-shims.js"></script>
+        <script type="importmap">
+            {
+              "imports": {
+                "three": "https://unpkg.com/three@0.97.0/build/three.module.js"                
+              }
+            }
+          </script>
+		</script>
+        <input type="number" class="captureElements captureInput" id="i_a" name="i_a" maxlength="2" min="1" max="99" oninput="validity.valid||(value='');">
+        <input type="number" class="captureElements captureInput" id="i_b" name="i_b" maxlength="2" min="1" max="99" oninput="validity.valid||(value='');">
+        <button class="captureElements" id="solveButton" onclick="initSolve()">Find</button>        
+        <button id="nextButton" onclick="next()">Next</button>        
+		<button id="restartButton" onclick="restart()">Again</button>        
+		<script type="module">
+
+            import * as THREE from 'three';
+            import { FontLoader } from 'https://unpkg.com/three@0.97.0/src/loaders/FontLoader.js';
+            var solveTimer = null
+			const scene = new THREE.Scene();
+			//const camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 2000 );
+            const camera = new THREE.OrthographicCamera( window.innerWidth / - 25, window.innerWidth / 25, window.innerHeight / 25, window.innerHeight / - 25, 1, 1000 );
+
+			const renderer = new THREE.WebGLRenderer();
+			renderer.setSize( window.innerWidth, window.innerHeight );
+			document.body.appendChild( renderer.domElement );			
+
+			camera.position.z = 30;                   
+            var animationFrame = null;     
+
+			function animate() {
+                if(animFunc != null)
+                {
+                    animFunc();
+                }
+				animationFrame = requestAnimationFrame( animate );				
+				renderer.render( scene, camera );                
+			};
+            var a = 0;
+            var b = 0;
+            var r = 0;
+            var old_r = 0;
+            var s = 0;
+            var old_s = 0;
+            var t = 0;
+            var old_t = 0;
+            var nextX = -40;
+            var xStep = 20;
+            var rvis = [];
+            var stack = [];          
+            var sticks = [];  
+            var colours = [0xff0000,0x00ff00,0x0000ff,0x00ffff,0xff00ff,0xffff00,0xffc0cb]
+            var colourIndex = 0;
+            var yAnchor = null;
+            var timerDelay = 1000;   
+            var yScale=1;   
+            var xScale=1;
+            var nextFunc=null;
+            window.onload = function() {
+                const light = new THREE.PointLight(0xffffff, 2);
+                light.position.set(0, 20, 20);
+                scene.add(light);                
+            }    
+            function restart()
+            {
+                while(scene.children.length > 0){ 
+                    scene.remove(scene.children[0]); 
+                }
+                const cs = document.getElementsByClassName("captureElements");
+                for (const c of cs) {    
+                    c.style.visibility = 'visible';
+                }
+                var rb = document.getElementById('restartButton');
+                rb.style.visibility = 'hidden';
+            }   
+            function initSolve()
+            {                     
+                while(scene.children.length > 0){ 
+                    scene.remove(scene.children[0]); 
+                }
+                sticks=[];
+                const cs = document.getElementsByClassName("captureElements");
+                for (const c of cs) {    
+                    c.style.visibility = 'hidden';
+                }
+
+                const light = new THREE.PointLight(0xffffff, 2)
+                light.position.set(0, 20, 20)
+                scene.add(light)
+                yAnchor=null;
+                nextX=-40;                
+                var i_a = document.getElementById('i_a');
+                var i_b = document.getElementById('i_b');
+                a = parseInt(i_a.value);
+                b = parseInt(i_b.value);                
+                if (a < b ) {
+                    var tmp = a;
+                    a = b;
+                    b = tmp;
+                }
+                yScale = 20 / a;        
+                var steps = quickSolveSteps(a,b);        
+                if(steps >= 6)
+                {
+                    var xDist = xStep * 5;
+                    xStep = xDist / steps;
+                }
+                solveStepVis(a,b)
+                /*       
+                old_r = a;
+                r = b;
+                old_s = 1;
+                s = 0;
+                old_t = 0;
+                t = 1;*/                
+            }  
+            function quickSolveSteps(aIn,bIn)
+            {
+                var r = aIn;
+                var rN = bIn;
+                var i = 0;
+                while(rN != 0)
+                {
+                    var q = Math.floor(r / rN);
+                    var rT = r;
+                    r = rN;
+                    rN = rT - q * rN;		            
+                    i++;
+                }
+                return i;
+            }
+            window.initSolve = initSolve;          
+            window.restart = restart;
+            window.next = next;
+            var animFunc = null;
+            var moveSteps = 100;
+            function solveStepVis(r, nextR) {
+                var rv = addVis(r,null,null,null)
+                var nrv = addVis(nextR,null,null,null)                
+                doStepVis(rv,nrv)
+            }
+            function doStepVis(rv,nrv) {                
+                rv.label.visible=true;
+                nrv.label.visible=true;
+                var q = Math.floor(rv.r / nrv.r);
+                writeText( rv.r + " / " + nrv.r + " = " + q,-20,yAnchor-15,0xffd700);   
+                var dX = nrv.group.position.x-rv.group.position.x;
+                var dY = nrv.bottom-rv.bottom;
+                var stepX = dX/moveSteps;
+                var stepY = dY/moveSteps;
+                animFunc = function() {
+                    align(rv,nrv,stepX,stepY);
+                }
+            }
+            function align(rv,nrv,stepX,stepY) {
+                nrv.group.position.x -= stepX; 
+                nrv.group.position.y -= stepY; 
+                var d = Math.sqrt(Math.pow(rv.group.position.x-nrv.group.position.x,2)+Math.pow(rv.bottom-nrv.bottom,2))
+                if(d<0.5)
+                {
+                    nrv.group.position.x = rv.group.position.x; 
+                    nrv.group.position.y = rv.bottom+getCubeHeight(nrv.cube)/2; 
+                    finishAlign(rv,nrv);                    
+                }else{
+                    nrv.group.position.x -= stepX; 
+                    nrv.group.position.y -= stepY; 
+                }                
+            }
+            
+            function finishAlign(rv,nrv)
+            {                                                    
+                animFunc = null;                        
+                var r = rv.r;
+                var nr = nrv.r;
+                var q = Math.floor(r / nr);
+                var newR = r-q*nr;                                  
+                checkQuotient(rv,nrv,newR,q,q)                                    
+            }
+            function checkQuotient(rv,nrv,newR,q,oq)
+            {
+                if(q>1)
+                {                    
+                    setTimeout(
+                            function()
+                            {
+                                addVis(nrv.r,nrv.group.position.x,nrv.group.position.y+(getCubeHeight(nrv.cube)*(oq-q+1)),nrv.colour)
+                                checkQuotient(rv,nrv,newR,q-1,oq);                             
+                            },
+                            timerDelay
+                        );
+                }else{                                        
+                    if(newR!=0)
+                    {                                                         
+                        setTimeout(
+                            function()
+                            {
+                                var newRv = addVis(newR,rv.group.position.x,rv.bottom+getCubeHeight(rv.cube)-tVal(newR),null) 
+                                setTimeout(
+                                    function()
+                                    {                                                                                              
+                                        nrv.dX = (nrv.group.position.x-nrv.origX)/moveSteps;
+                                        nrv.dY = (nrv.group.position.y-nrv.origY)/moveSteps;                                
+                                        newRv.origX = nextX;
+                                        nextX += xStep;
+                                        newRv.origY = yAnchor+getCubeHeight(newRv.cube)/2;
+                                        newRv.label.position.x = newRv.origX;
+                                        newRv.label.position.y = yAnchor;
+                                        offsetLabel(newRv.label);
+                                        newRv.dX = (newRv.group.position.x-newRv.origX)/moveSteps;
+                                        newRv.dY = (newRv.group.position.y-newRv.origY)/moveSteps;
+                                        var movingSticks = {
+                                            rv:nrv,
+                                            nrv:newRv,
+                                            steps:moveSteps
+                                        }
+                                        writeText( rv.r + " / " + nrv.r + " = " + oq + " : r = " + newR,-20,yAnchor-15,0xffd700);
+                                        nextFunc=function()
+                                        {
+                                            for(var i = 0; i < stack.length; i++)
+                                            {
+                                                var group = stack[i].group;
+                                                scene.remove(group);
+                                            }
+                                            stack = [];
+                                            animFunc =function(){moveSticks(movingSticks);}
+                                        }
+                                        showNext();
+                                    },timerDelay
+                                );
+                            },
+                            timerDelay
+                        );
+                    }else{
+                        setTimeout(
+                            function()
+                            {                                
+                                nrv.dX = (nrv.group.position.x-nrv.origX)/moveSteps;
+                                nrv.dY = (nrv.group.position.y-nrv.origY)/moveSteps;
+                                nrv.steps = moveSteps;
+                                writeText( rv.r + " / " + nrv.r + " = " + oq + " : r = " + newR,-20,yAnchor-15,0xffd700);
+                                nextFunc=function()
+                                {                  
+                                    for(var i = 0; i < stack.length; i++)
+                                    {
+                                        var group = stack[i].group;
+                                        scene.remove(group);
+                                    }
+                                    stack=[];                          
+                                    animFunc =function(){moveStick(nrv);}
+                                }
+                                showNext();
+                            },timerDelay
+                        );
+                    }
+                }
+            }            
+            function moveSticks(movingSticks)
+            {                
+                var rv = movingSticks.rv;
+                var nrv = movingSticks.nrv;
+                if(movingSticks.steps<=0)
+                {     
+                    rv.bottom = rv.group.position.y-getCubeHeight(rv.cube)/2               
+                    nrv.bottom = nrv.group.position.y-getCubeHeight(nrv.cube)/2               
+                    animFunc=function(){
+                        doStepVis(rv,nrv);
+                    }
+                    return;
+                }                
+                movingSticks.steps--;
+                rv.group.position.x -= rv.dX;
+                rv.group.position.y -= rv.dY;
+                nrv.group.position.x -= nrv.dX;
+                nrv.group.position.y -= nrv.dY;                
+            }
+            function moveStick(nrv)
+            {
+                if(nrv.steps<=0)
+                {                    
+                    animFunc=null;   
+                    startReverse();             
+                    return;
+                }                
+                nrv.steps--;
+                nrv.group.position.x -= nrv.dX;
+                nrv.group.position.y -= nrv.dY;
+            }
+            function startReverse()
+            {
+                writeText( "Let's see that in reverse.",-20,yAnchor-15,0xffd700);   
+                setTimeout(
+                    function()
+                    {
+                        nextFunc=function(){doReverse(sticks.length-1);}
+                        showNext();
+                    }
+                    ,timerDelay
+                );
+            }
+            function getCubeHeight(cube)
+            {
+                return cube.geometry.parameters.height;
+            }             
+            function solveStep() {
+                if(r != 0) {
+                    addVis(old_r,null,null,null);                        
+                    quotient = Math.floor(old_r / r);                    
+                    temp_r = r; 
+                    r = old_r-quotient*r;
+                    old_r = temp_r;
+                    temp_s = s;
+                    s = old_s-quotient*s;
+                    old_s = temp_s;
+                    temp_t = t;
+                    t = old_t-quotient*t;
+                    old_t = temp_t;                            
+                } else {
+                    addVis(old_r,null,null,null);                    
+                    window.clearInterval(solveTimer);
+                }
+            }
+            function showNext() {
+                var nb = document.getElementById('nextButton');
+                nb.style.visibility = 'visible';
+            }            
+            function next() {
+                nextFunc();
+                nextFunc = null;
+                var nb = document.getElementById('nextButton');
+                nb.style.visibility = 'hidden';
+            }     
+            function addVis(val,x,y,c) {
+                //const geometry = new THREE.BoxGeometry( 2, val*2, 1 );                
+                const geometry = new THREE.CylinderGeometry( 1, 1, tVal(val)*2, 32 );
+                //geometry.translate( 0, val, 0 );
+                var colour = colours[colourIndex]
+                if(c != null)
+                {
+                    colour = c;
+                }
+                else
+                {
+                    colourIndex++;                    
+                    if( colourIndex == colours.length )
+                    {
+                        colourIndex = 0;
+                    }                
+                }
+                //const material = new THREE.MeshBasicMaterial( { color: colour } );
+                const material = new THREE.MeshPhongMaterial( { color: colour } );
+			    //const cube = new THREE.Mesh( geometry, material );
+                const cube = new THREE.Mesh( geometry, material );
+                const group = new THREE.Object3D();
+                group.add(cube);                
+                var xPos = nextX;
+                if(x != null)
+                {
+                    xPos = x                    
+                }else{
+                    nextX += xStep;
+                }
+                var yPos = group.position.y;
+                if(y != null)
+                {
+                    yPos = y;
+                }
+                group.position.x = xPos;                                
+                group.position.y = yPos;                  
+                
+                if(yAnchor==null)
+                {
+                    yAnchor=group.position.y-tVal(val);
+                }                               
+                else if(y==null)
+                {
+                    group.position.y = yAnchor+tVal(val); 
+                }
+                addBorders(cube,tVal(val),group);
+                
+                scene.add(group);
+                var rv = {}
+                rv.origX = group.position.x;
+                rv.origY = group.position.y;
+                rv.cube = cube;
+                rv.group = group;
+                rv.r=val;  
+                rv.bottom=group.position.y-tVal(val); 
+                if(c==null)
+                {               
+                    rv.label = writeLabel(val.toString(),rv.origX,rv.bottom)                    
+                    sticks.push(rv);
+                }
+                else
+                {
+                    stack.push(rv);
+                }                
+                rv.colour = colour;                
+                return rv;
+            }
+            function tVal(val)
+            {
+                return val * yScale;
+            }
+            function addBorders(mainMesh,val, group)
+            {
+                var bottomBorder = addBorder(val);
+                var topBorder = addBorder(val);
+                bottomBorder.position.x = mainMesh.position.x;
+                topBorder.position.x = mainMesh.position.x;
+                //bottomBorder.position.y += val;
+                topBorder.position.y = mainMesh.position.y + getCubeHeight(mainMesh)/2;
+                //bottomBorder.position.y -= val;
+                bottomBorder.position.y = mainMesh.position.y - getCubeHeight(mainMesh)/2;
+                group.add(bottomBorder);
+                group.add(topBorder);
+            }
+            function addBorder(val)
+            {
+                const geometry = new THREE.CylinderGeometry( 1, 1, 0.5, 32 );
+                //geometry.translate( 0, val, 0 );
+                var colour = 0xffffff;
+                const material = new THREE.MeshPhongMaterial( { color: colour } );
+                const mesh = new THREE.Mesh( geometry, material );
+                return mesh;
+            }
+            var textLoaded = false;
+            var font;
+            function writeText(val, x, y, c)
+            {                                
+                if(textLoaded == false)
+                {
+                    const loader = new FontLoader();
+                    loader.load( 'https://unpkg.com/three@0.97.0/examples/fonts/helvetiker_regular.typeface.json', function ( response ) {
+                        font = response;
+                        textLoaded=true; 
+                        directWriteText(val, x, y, c);
+                        const cs = document.getElementsByClassName("captureElements");
+                        for (const c of cs) {    
+                            c.style.visibility = 'visible';
+                        }    
+                        document.getElementById("i_a").focus();                        
+                    } )
+                }else{
+                    directWriteText(val, x, y, c)
+                }                
+            }
+            var text=null;
+            function directWriteText(val, x, y, c)
+            {
+                if(text != null)
+                {
+                    scene.remove(text);
+                }
+                var col = c;
+                if(c == null)
+                {
+                    col = 0xffffff;
+                }
+                const geometry = new THREE.TextGeometry( val, {
+                    font: font,
+                    size: 5,
+                    height: 5,
+                    curveSegments: 12,
+                    bevelEnabled: false,
+                    bevelThickness: 1,
+                    bevelSize: 1,
+                    bevelOffset: 0,
+                    bevelSegments: 5
+                } );
+                const material = new THREE.MeshPhongMaterial( { color: col } );
+			    //const cube = new THREE.Mesh( geometry, material );
+                text = new THREE.Mesh( geometry, material );                
+                text.position.x = x;
+                text.position.y = y;
+                scene.add(text);
+            }
+            var labelHeight = 5;
+            function writeLabel(val,x,y) 
+            {
+                const geometry = new THREE.TextGeometry( val, {
+                    font: font,
+                    size: 5,
+                    height: labelHeight,
+                    curveSegments: 12,
+                    bevelEnabled: false,
+                    bevelThickness: 1,
+                    bevelSize: 1,
+                    bevelOffset: 0,
+                    bevelSegments: 5
+                } );
+                const material = new THREE.MeshPhongMaterial( { color: 0xffffff } );
+			    //const cube = new THREE.Mesh( geometry, material );
+                var label = new THREE.Mesh( geometry, material );                
+                label.position.x = x;
+                label.position.y = y;
+                offsetLabel(label);
+                label.visible=false;
+                scene.add(label);
+                return label;
+            }
+            function offsetLabel(label)
+            {
+                let measure = new THREE.Vector3();
+                label.geometry.computeBoundingBox();
+                let box = label.geometry.boundingBox;
+                label.position.x -= (box.max.x-box.min.x)/2;
+                label.position.y -= ((box.max.y-box.min.y)+((box.max.y-box.min.y)/2));
+            }
+			animate();
+            writeText(
+                "Find the Greatest Common Divisor\n(GCD) of two numbers.\nThe GCD is the largest number that divides\ninto both numbers. For example, the GCD\nof 18 and 12 is 6.\n\nFind GCD of:",
+                -65,
+                20,
+                null
+            )
+            function stackReverse(gcd,rv,rvp,rrv,q,oq,index) {
+                if(oq == null)
+                {                    
+                    oq = Math.floor(rvp.r / rv.r);
+                    q = oq;
+                    writeText( rvp.r + " / " + rv.r + " = " + oq,-20,yAnchor-15,0xffd700);
+                }
+                if(q!=0)
+                {                    
+                    setTimeout(
+                        function()
+                        {                            
+                            var gcdQ = rv.r / gcd.r;
+                            for(var i = 0;i < gcdQ;i++) 
+                            {
+                                addVis(gcd.r,rvp.group.position.x+2,gcd.group.position.y+(getCubeHeight(rv.cube)*(oq-q)+getCubeHeight(gcd.cube)*i),rv.colour);                                
+                            }
+                            stackReverse(gcd,rv,rvp,rrv,q-1,oq,index);                            
+                        },
+                        timerDelay
+                    );
+                }else{
+                    setTimeout(
+                        function()
+                        {
+                            if(rrv!=null)
+                            {
+                                writeText(rvp.r + " / " + rv.r + " = " + oq + " : r = " + rrv.r,-20,yAnchor-15,0xffd700);
+                                var gcdQ = rrv.r / gcd.r;
+                                //const group = new THREE.Object3D();
+                                for(var i = 0;i < gcdQ;i++) 
+                                {
+                                    var yPos = gcd.group.position.y+(getCubeHeight(rv.cube)*(oq-q)+getCubeHeight(gcd.cube)*i);                                    
+                                    addVis(gcd.r,rvp.group.position.x+2,yPos,rrv.colour);                                                                        
+                                }                                                   
+                            }
+                            else
+                            {
+                                writeText(rvp.r + " / " + rv.r + " = " + oq + " : r = " + 0,-20,yAnchor-15,0xffd700);                                
+                            }
+                            setTimeout(
+                                function()
+                                {
+                                    nextFunc = function(){doReverse(index-1);}
+                                    showNext();
+                                },    
+                                timerDelay                            
+                            )
+                        },
+                        timerDelay
+                    );
+                }
+            }
+            //Start reverse
+            function doReverse(index) {
+                var gcd = sticks[sticks.length-1];                
+                if(index > 0) {
+                    var rv = sticks[index];
+                    var rvp = sticks[index-1];     
+                    var rrv = null;
+                    if(sticks.length-index > 1)
+                    {
+                        rrv = sticks[index+1];
+                    }  
+                    stackReverse(gcd,rv,rvp,rrv,null,null,index);
+                }
+                else
+                {
+                    var rb = document.getElementById('restartButton');
+                    rb.style.visibility = 'visible';
+                }
+            }
+		</script>        
+	</body>
+</html>
